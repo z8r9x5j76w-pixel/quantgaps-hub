@@ -1193,9 +1193,16 @@ def main():
 
     for tab, cfg in zip(tabs[:-1], STRATEGIES):
         with tab:
-            result = run_strategy_tab(cfg)
-            if result is not None:
-                all_metrics[cfg.strategy_id] = result
+            st.caption(f"**{cfg.ticker}** · {cfg.direction} · {cfg.status}")
+            btn_key = f"run_{cfg.strategy_id}"
+            if st.button(f"▶ Load {cfg.ticker} data", key=btn_key, type="primary"):
+                st.session_state[f"loaded_{cfg.strategy_id}"] = True
+            if st.session_state.get(f"loaded_{cfg.strategy_id}"):
+                result = run_strategy_tab(cfg)
+                if result is not None:
+                    all_metrics[cfg.strategy_id] = result
+            else:
+                st.info("Click the button above to load this strategy.")
 
     with tabs[-1]:
         run_rankings_tab(all_metrics)

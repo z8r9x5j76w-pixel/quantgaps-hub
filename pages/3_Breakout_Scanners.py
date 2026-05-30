@@ -821,13 +821,18 @@ with tab1:
             key="db_tickers",
         )
 
-    if st.button("▶ Run Double Bottom Scan", key="db_run", type="primary"):
-        st.cache_data.clear()
-
     tickers_clean = tuple(sorted(set(
         t.strip().upper() for t in ticker_input.splitlines()
         if t.strip() and not t.strip().startswith("#")
     )))
+
+    if st.button("▶ Run Double Bottom Scan", key="db_run", type="primary"):
+        st.cache_data.clear()
+        st.session_state["db_loaded"] = True
+
+    if not st.session_state.get("db_loaded"):
+        st.info("Click **▶ Run Double Bottom Scan** to start.")
+        st.stop()
 
     with st.spinner("Downloading data and scanning…"):
         db_signals, db_last_trades, db_stats, db_asof = db_run_scan(tickers_clean)
@@ -868,6 +873,11 @@ with tab2:
 
     if st.button("▶ Run Mixed-100 Scan", key="m100_run", type="primary"):
         st.cache_data.clear()
+        st.session_state["m100_loaded"] = True
+
+    if not st.session_state.get("m100_loaded"):
+        st.info("Click **▶ Run Mixed-100 Scan** to start. First run takes ~60 seconds.")
+        st.stop()
 
     with st.spinner("Downloading history and running backtest… (this takes ~60s on first run)"):
         m100_signals, m100_trades, m100_stats, m100_asof = m100_run_scan()
@@ -906,10 +916,13 @@ with tab3:
     st.markdown("### TBB15 ATR Triple-Bottom Basket")
     st.caption("Triple-bottom breakout · SL 2×ATR · TP 4×ATR · MaxHold 60d · 15 mega-caps")
 
-    col_run, col_note = st.columns([1,3])
-    with col_run:
-        if st.button("▶ Run TBB15 Scan", key="tbb_run", type="primary"):
-            st.cache_data.clear()
+    if st.button("▶ Run TBB15 Scan", key="tbb_run", type="primary"):
+        st.cache_data.clear()
+        st.session_state["tbb_loaded"] = True
+
+    if not st.session_state.get("tbb_loaded"):
+        st.info("Click **▶ Run TBB15 Scan** to start.")
+        st.stop()
 
     with st.spinner("Scanning for triple-bottom breakouts…"):
         tbb_sigs, tbb_exits, tbb_state, tbb_bt, tbb_today = tbb_run_scan()

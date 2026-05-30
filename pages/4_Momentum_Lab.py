@@ -1295,9 +1295,16 @@ def main():
 
     for i, cfg in enumerate(STRATEGIES):
         with tabs[i]:
-            result = run_strategy_tab(cfg)
-            if result:
-                all_metrics[cfg.strategy_id] = result
+            st.caption(f"**{cfg.ticker}** · {cfg.strategy_id}")
+            btn_key = f"run_ml_{cfg.strategy_id}"
+            if st.button(f"▶ Load {cfg.ticker} data", key=btn_key, type="primary"):
+                st.session_state[f"loaded_ml_{cfg.strategy_id}"] = True
+            if st.session_state.get(f"loaded_ml_{cfg.strategy_id}"):
+                result = run_strategy_tab(cfg)
+                if result:
+                    all_metrics[cfg.strategy_id] = result
+            else:
+                st.info("Click the button above to load this strategy.")
 
     with tabs[-1]:
         render_rankings(all_metrics)
