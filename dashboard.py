@@ -428,24 +428,95 @@ def db_check(df):
                     strength_pct=round((cl-neck)/neck*100,2))
     return None
 
-@st.cache_data(ttl=3600,show_spinner=False)
+def db_check_signal(df, end_pos):
+    """Exact logic from compute_breakout_signal in v4_4"""
+    if end_pos <= 0: return None
+    start = max(0, end_pos - 180 + 1)
+    window = df.iloc[start:end_pos + 1]
+    patt = db_pattern(window)
+    if not patt: return None
+    neck = float(patt["neckline"])
+    ct = float(df["Close"].iloc[end_pos])
+    cy = float(df["Close"].iloc[end_pos - 1])
+    if not (cy <= neck and ct > neck): return None
+    return {"neckline": neck, "strength": (ct - neck) / neck}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def db_scan():
-    sigs=[]
-    raw=yf.download(list(DB_TICKERS),period="2y",interval="1d",
-                    group_by="ticker",progress=False,auto_adjust=False)
+    DB_MAX_POS = 10
+    raw = yf.download(list(DB_TICKERS), period="5y", interval="1d",
+                      group_by="ticker", progress=False, auto_adjust=False)
+    data_by_ticker = {}; date_sets = []
     for t in DB_TICKERS:
         try:
-            if hasattr(raw.columns,"levels") and t in raw.columns.levels[0]:
-                df=raw[t].dropna()
+            if hasattr(raw.columns, "levels") and len(raw.columns.levels) > 1:
+                if t not in raw.columns.levels[0]: continue
+                df = raw[t].copy()
             else:
-                df=raw.dropna()
-            if isinstance(df.columns,pd.MultiIndex): df.columns=[c[0] for c in df.columns]
-            df.index=pd.to_datetime(df.index)
-            if len(df)<100: continue
-            s=db_check(df[["Open","High","Low","Close"]])
-            if s: sigs.append({"ticker":t,**s})
-        except: pass
-    sigs.sort(key=lambda x:x["strength_pct"],reverse=True)
+                df = raw.copy()
+            df = df.dropna()
+            if isinstance(df.columns, pd.MultiIndex): df.columns = [c[0] for c in df.columns]
+            needed = {"Open", "High", "Low", "Close"}
+            if not needed.issubset(set(df.columns)): continue
+            df.index = pd.to_datetime(df.index); df = df.sort_index()
+            if len(df) < 200: continue
+            data_by_ticker[t] = df[["Open", "High", "Low", "Close"]]
+            date_sets.append(set(df.index))
+        except: continue
+    if not data_by_ticker or not date_sets: return []
+    common_dates = sorted(list(set.intersection(*date_sets)))
+    dates = pd.DatetimeIndex(common_dates)
+    # Portfolio simulation to track open positions (matches original)
+    open_positions = {}; pending = {}
+    for di in range(1, len(dates)):
+        date = dates[di]
+        if date in pending:
+            cands = pending.pop(date); cands.sort(key=lambda x: x[1], reverse=True)
+            for tk, strength, neck in cands:
+                if tk in open_positions or len(open_positions) >= DB_MAX_POS: break
+                df = data_by_ticker.get(tk)
+                if df is None or date not in df.index: continue
+                o = float(df.loc[date, "Open"])
+                if not np.isfinite(o) or o <= 0: continue
+                open_positions[tk] = {"days_held": 0,
+                    "sl_price": o * (1 - DB_SL), "tp_price": o * (1 + DB_TP)}
+        to_close = []
+        for tk, pos in open_positions.items():
+            df = data_by_ticker.get(tk)
+            if df is None or date not in df.index: continue
+            bar = df.loc[date]; pos["days_held"] += 1
+            lo = float(bar["Low"]); hi = float(bar["High"]); cl = float(bar["Close"])
+            if (np.isfinite(lo) and lo <= pos["sl_price"]) or                (np.isfinite(hi) and hi >= pos["tp_price"]) or                pos["days_held"] >= 20:
+                to_close.append(tk)
+        for tk in to_close: open_positions.pop(tk, None)
+        if di < len(dates) - 1:
+            next_date = dates[di + 1]; cands = []
+            for tk, df in data_by_ticker.items():
+                if tk in open_positions: continue
+                if date not in df.index or dates[di - 1] not in df.index: continue
+                ep = df.index.get_loc(date)
+                sig = db_check_signal(df, ep)
+                if sig: cands.append((tk, sig["strength"], sig["neckline"]))
+            if cands: pending.setdefault(next_date, []).extend(cands)
+    # Fresh signals on latest close, respecting MaxPos slots
+    latest = dates[-1]; prev = dates[-2] if len(dates) >= 2 else dates[-1]
+    slots = DB_MAX_POS - len(open_positions); sigs = []
+    if slots > 0:
+        for tk, df in data_by_ticker.items():
+            if tk in open_positions: continue
+            if latest not in df.index or prev not in df.index: continue
+            ep = df.index.get_loc(latest)
+            sig = db_check_signal(df, ep)
+            if sig:
+                cl = float(df.loc[latest, "Close"])
+                sigs.append({"ticker": tk, "signal_date": str(latest.date()),
+                    "close": round(cl, 2), "neckline": round(sig["neckline"], 2),
+                    "stop_loss": round(cl * (1 - DB_SL), 2),
+                    "take_profit": round(cl * (1 + DB_TP), 2),
+                    "strength_pct": round(sig["strength"] * 100, 2)})
+        sigs.sort(key=lambda x: x["strength_pct"], reverse=True)
+        sigs = sigs[:slots]
     return sigs
 
 
